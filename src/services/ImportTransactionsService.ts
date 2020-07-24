@@ -1,7 +1,7 @@
 import path from 'path';
 import fs from 'fs';
 import csvParse from 'csv-parse/lib/sync';
-import { getRepository, getCustomRepository } from 'typeorm';
+import { getRepository, getCustomRepository, In } from 'typeorm';
 import Transaction from '../models/Transaction';
 import uploadConfig from '../config/upload';
 import AppError from '../errors/AppError';
@@ -45,47 +45,49 @@ class ImportTransactionsService {
         transaction => transaction.category,
       );
       const uniqueCategories = [...new Set(categoryTitles)];
-
-      const createdCategories = uniqueCategories.map(async category => {
-        const categoryExists = await categoryRepository.findOne({
-          where: { title: category },
-        });
-        if (!categoryExists) {
-          const newCategory = categoryRepository.create({ title: category });
-          await categoryRepository.save(newCategory);
-          return newCategory;
-        }
-        return categoryExists;
+      const existentCategories = await categoryRepository.find({
+        where: In(uniqueCategories),
       });
+      const existentCategoriesTitles = existentCategories.map(
+        category => category.title,
+      );
 
-      await Promise.all(createdCategories);
+      const categoriesToCreate = uniqueCategories.filter(
+        category => !existentCategoriesTitles.includes(category),
+      );
 
-      const newTransactions = transactions.map(
-        async ({ title, value, type, category }): Promise<Transaction> => {
-          const categoryToInsert = await categoryRepository.findOne({
-            where: { title: category },
-          });
-          if (categoryToInsert) {
-            const categoryId = categoryToInsert.id;
-            const newTransaction = transactionsRepository.create({
-              title,
-              value,
-              type,
-              category_id: categoryId,
-            });
-            await transactionsRepository.save(newTransaction);
-            return newTransaction;
-          }
-          throw new AppError(
-            "Couldn't complete insertion of uploaded CSV file transactions.",
-            500,
+      const createdCategories = categoryRepository.create(
+        categoriesToCreate.map(categoryTitle => ({
+          title: categoryTitle,
+        })),
+      );
+
+      await categoryRepository.save(createdCategories);
+
+      const allCategories = [...createdCategories, ...existentCategories];
+
+      const transactionsToCreate = transactions.map(
+        ({ title, value, type, category }) => {
+          const currentTransactionCategory = allCategories.find(
+            targetCategory => targetCategory.title === category,
           );
+          return {
+            title,
+            value,
+            type,
+            category_id: currentTransactionCategory?.id,
+          };
         },
       );
 
-      const createdTransactions = await Promise.all(newTransactions);
+      const newTransactions = transactionsRepository.create(
+        transactionsToCreate,
+      );
+
+      await transactionsRepository.save(newTransactions);
+
       await fs.promises.unlink(filePath);
-      return createdTransactions;
+      return newTransactions;
     }
     throw new AppError('Could not find CSV file in upload folder', 500);
   }
