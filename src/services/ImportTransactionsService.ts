@@ -32,7 +32,7 @@ class ImportTransactionsService {
       const categoryRepository = getRepository(Category);
       const file = await fs.promises.readFile(filePath);
 
-      /* Uses csv-parse to parse the CSV file into an array of objects where each object have the information to craete transaction on the database. */
+      /* Uses csv-parse to parse the CSV file into an array of objects where each object have the information to create transaction on the database. */
       const transactions: TransactionDTO[] = csvParse(file, {
         columns: true,
         skip_empty_lines: true,
